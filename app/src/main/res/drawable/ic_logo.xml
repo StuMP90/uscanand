@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated with the launcher icon; keep the geometry of both files in sync. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="50dp"
+    android:height="50dp"
+    android:viewportWidth="50"
+    android:viewportHeight="50">
+    <group android:translateX="-29" android:translateY="-29">
+        <path android:strokeColor="#7D8B98" android:strokeWidth="3" android:strokeLineCap="round" android:pathData="M47,48L61,48" />
+        <path android:strokeColor="#7D8B98" android:strokeWidth="3" android:strokeLineCap="round" android:pathData="M47,54.5L63,54.5" />
+        <path android:strokeColor="#7D8B98" android:strokeWidth="3" android:strokeLineCap="round" android:pathData="M47,61L58,61" />
+        <path android:strokeColor="#4F9DDE" android:strokeWidth="5" android:strokeLineCap="round" android:pathData="M40,38L68,36" />
+        <path android:strokeColor="#E0773E" android:strokeWidth="5" android:strokeLineCap="round" android:pathData="M68,36L71,71" />
+        <path android:strokeColor="#D9C04A" android:strokeWidth="5" android:strokeLineCap="round" android:pathData="M71,71L37,70" />
+        <path android:strokeColor="#49B8B0" android:strokeWidth="5" android:strokeLineCap="round" android:pathData="M37,70L40,38" />
+        <path android:fillColor="#4F9DDE" android:strokeColor="#14161A" android:strokeWidth="1.8" android:pathData="M34,38a6,6 0,1 0,12,0a6,6 0,1 0,-12,0z" />
+        <path android:fillColor="#E0773E" android:strokeColor="#14161A" android:strokeWidth="1.8" android:pathData="M62,36a6,6 0,1 0,12,0a6,6 0,1 0,-12,0z" />
+        <path android:fillColor="#D9C04A" android:strokeColor="#14161A" android:strokeWidth="1.8" android:pathData="M65,71a6,6 0,1 0,12,0a6,6 0,1 0,-12,0z" />
+        <path android:fillColor="#49B8B0" android:strokeColor="#14161A" android:strokeWidth="1.8" android:pathData="M31,70a6,6 0,1 0,12,0a6,6 0,1 0,-12,0z" />
+    </group>
+</vector>
