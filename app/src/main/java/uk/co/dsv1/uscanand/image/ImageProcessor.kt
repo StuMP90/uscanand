@@ -80,7 +80,7 @@ object ImageProcessor {
      * Applies a page's crop, rotation and filter. Returns a new bitmap, or [original] itself when
      * there is nothing to apply; [original] is never recycled.
      */
-    fun render(original: Bitmap, page: Page): Bitmap {
+    fun render(original: Bitmap, page: Page, mesh: FlattenMesh?): Bitmap {
         var current = original
         fun advance(next: Bitmap) {
             if (current !== original && current !== next) current.recycle()
@@ -88,8 +88,42 @@ object ImageProcessor {
         }
         page.crop?.takeUnless(QuadMath::isFull)?.let { advance(perspectiveCrop(current, it)) }
         advance(rotate(current, page.rotation))
+        mesh?.let { advance(applyFlatten(current, it)) }
         advance(applyFilter(current, page.filter))
         return current
+    }
+
+    /** The image a page's flatten mesh is computed from: cropped and rotated, but not flattened or filtered. */
+    fun renderForFlattening(original: Bitmap, page: Page): Bitmap =
+        render(original, page.copy(filter = PageFilter.ORIGINAL), mesh = null)
+
+    /** Warps [src] with a mesh from FlattenSolver so that curved text lines and paper edges come out straight. */
+    fun applyFlatten(src: Bitmap, mesh: FlattenMesh): Bitmap {
+        val width = src.width.toFloat()
+        val height = src.height.toFloat()
+        val vertices = FloatArray(mesh.nodeCount * 2)
+        var i = 0
+        for (row in 0..mesh.rows) {
+            for (column in 0..mesh.columns) {
+                vertices[i * 2] = column * width / mesh.columns + mesh.dx[i] * width
+                vertices[i * 2 + 1] = row * height / mesh.rows + mesh.dy[i] * height
+                i++
+            }
+        }
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        Canvas(out).apply {
+            drawColor(Color.WHITE)
+            drawBitmapMesh(src, mesh.columns, mesh.rows, vertices, 0, null, 0, Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG))
+        }
+        return out
+    }
+
+    /** Row-major brightness (0..255) of every pixel. */
+    fun luminance(src: Bitmap): IntArray {
+        val pixels = IntArray(src.width * src.height)
+        src.getPixels(pixels, 0, src.width, 0, 0, src.width, src.height)
+        for (i in pixels.indices) pixels[i] = luma(pixels[i])
+        return pixels
     }
 
     fun rotate(src: Bitmap, degrees: Int): Bitmap {

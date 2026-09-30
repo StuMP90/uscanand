@@ -42,6 +42,18 @@ class UScanApp : Application() {
             }
         }
     }
+
+    /** Flattens every page of a document in the background, then reports how it went. */
+    fun flattenAllPages(docId: String) {
+        appScope.launch {
+            val (flattened, failed) = repository.flattenAll(docId)
+            withContext(Dispatchers.Main) {
+                var message = resources.getQuantityString(R.plurals.flatten_all_done, flattened, flattened)
+                if (failed > 0) message += " " + resources.getQuantityString(R.plurals.flatten_all_skipped, failed, failed)
+                Toast.makeText(this@UScanApp, message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 }
 
 val Context.app: UScanApp get() = applicationContext as UScanApp

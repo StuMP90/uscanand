@@ -37,7 +37,7 @@ class PdfExporter(private val context: Context, private val repository: Document
                             ensureActive()
                             onProgress(index, doc.pages.size)
                             val original = ImageProcessor.decodeFile(repository.imageFile(doc.id, page), settings.quality.maxDimension)
-                            val rendered = ImageProcessor.render(original, page)
+                            val rendered = ImageProcessor.render(original, page, repository.loadMesh(doc.id, page))
                             try {
                                 val lines = if (ocr != null && !ocrFailed) {
                                     try {

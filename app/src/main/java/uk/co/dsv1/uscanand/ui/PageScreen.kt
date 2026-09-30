@@ -17,6 +17,8 @@ import androidx.compose.material.icons.automirrored.filled.RotateLeft
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Straighten
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -52,7 +54,8 @@ import uk.co.dsv1.uscanand.data.PageFilter
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PageScreen(docId: String, pageId: String, onBack: () -> Unit, onCrop: () -> Unit) {
-    val repository = LocalContext.current.app.repository
+    val context = LocalContext.current
+    val repository = context.app.repository
     val documents by repository.documents.collectAsStateWithLifecycle()
     val doc = documents?.find { it.id == docId }
     val index = doc?.pages?.indexOfFirst { it.id == pageId } ?: -1
@@ -118,6 +121,19 @@ fun PageScreen(docId: String, pageId: String, onBack: () -> Unit, onCrop: () -> 
                             edit { it.copy(rotation = (it.rotation + 90) % 360) }
                         }
                         ToolButton(Icons.Filled.Crop, R.string.crop, onClick = onCrop)
+                        ToolButton(Icons.Filled.Straighten, R.string.flatten, selected = page.isFlattened) {
+                            val enable = !page.isFlattened
+                            scope.launch {
+                                pendingEdits++
+                                try {
+                                    if (!repository.setFlatten(docId, pageId, enable)) {
+                                        context.toast(context.getString(R.string.flatten_failed))
+                                    }
+                                } finally {
+                                    pendingEdits--
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -144,8 +160,16 @@ fun PageScreen(docId: String, pageId: String, onBack: () -> Unit, onCrop: () -> 
 }
 
 @Composable
-private fun ToolButton(icon: ImageVector, @StringRes label: Int, onClick: () -> Unit) {
-    TextButton(onClick = onClick) {
+private fun ToolButton(icon: ImageVector, @StringRes label: Int, selected: Boolean = false, onClick: () -> Unit) {
+    val colors = if (selected) {
+        ButtonDefaults.textButtonColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+    } else {
+        ButtonDefaults.textButtonColors()
+    }
+    TextButton(onClick = onClick, colors = colors) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(icon, contentDescription = null)
             Text(stringResource(label), style = MaterialTheme.typography.labelMedium)

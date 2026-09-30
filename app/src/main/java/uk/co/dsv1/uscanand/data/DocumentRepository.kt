@@ -14,7 +14,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import uk.co.dsv1.uscanand.image.FlattenMesh
+import uk.co.dsv1.uscanand.image.FlattenSolver
 import uk.co.dsv1.uscanand.image.ImageProcessor
+import uk.co.dsv1.uscanand.image.PaperEdgeDetector
+import uk.co.dsv1.uscanand.image.RuleDetector
+import uk.co.dsv1.uscanand.ocr.OcrEngine
 import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
@@ -41,10 +46,10 @@ class DocumentRepository(private val context: Context) {
     /** All documents, most recently updated first; null until loaded. */
     val documents: StateFlow<List<ScanDocument>?> = _documents.asStateFlow()
 
-    private val _importing = MutableStateFlow<Set<String>>(emptySet())
+    private val _busy = MutableStateFlow<Set<String>>(emptySet())
 
-    /** IDs of documents that are currently receiving new pages. */
-    val importing: StateFlow<Set<String>> = _importing.asStateFlow()
+    /** IDs of documents with background work running: pages being added or flattened. */
+    val busy: StateFlow<Set<String>> = _busy.asStateFlow()
 
     suspend fun load() = withContext(Dispatchers.IO) {
         val loaded = root.listFiles().orEmpty().mapNotNull { dir ->
@@ -63,6 +68,16 @@ class DocumentRepository(private val context: Context) {
 
     fun previewFile(docId: String, page: Page) = File(dir(docId), page.previewFile)
 
+    /** The page's flattening mesh, if it has one and it can be read. */
+    fun loadMesh(docId: String, page: Page): FlattenMesh? {
+        page.flattenMesh?.let { name ->
+            return runCatching { FlattenMesh.fromBytes(File(dir(docId), name).readBytes()) }
+                .onFailure { Log.w(TAG, "Unreadable flatten mesh for page ${page.id}", it) }
+                .getOrNull()
+        }
+        return page.flatten?.let(FlattenMesh::fromLegacy)
+    }
+
     suspend fun createDocument(): ScanDocument = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val name = "Scan " + SimpleDateFormat("yyyy-MM-dd HH.mm", Locale.getDefault()).format(Date(now))
@@ -77,7 +92,7 @@ class DocumentRepository(private val context: Context) {
 
     /** Copies images into a document as new pages, in order. Returns how many could not be read. */
     suspend fun addImages(docId: String, uris: List<Uri>): Int = withContext(Dispatchers.IO) {
-        _importing.update { it + docId }
+        _busy.update { it + docId }
         var failures = 0
         try {
             for (uri in uris) {
@@ -100,22 +115,56 @@ class DocumentRepository(private val context: Context) {
                 }
             }
         } finally {
-            _importing.update { it - docId }
+            _busy.update { it - docId }
         }
         failures
     }
 
-    /** Applies [transform] to the latest state of a page and re-renders its preview. */
+    /**
+     * Applies [transform] to the latest state of a page and re-renders its preview. A flattened page
+     * is re-flattened if its crop or rotation changed, or unflattened if that no longer works.
+     */
     suspend fun editPage(docId: String, pageId: String, transform: (Page) -> Page) = withContext(Dispatchers.Default) {
         editMutex.withLock {
-            val page = find(docId)?.pages?.find { it.id == pageId } ?: return@withLock
-            val edited = transform(page).copy(version = page.version)
+            val page = findPage(docId, pageId) ?: return@withLock
+            var edited = transform(page).copy(version = page.version)
             if (edited == page) return@withLock
-            writePreview(docId, edited, source = null)
-            val updated = edited.copy(version = page.version + 1)
-            modify(docId) { doc -> doc.copy(pages = doc.pages.map { if (it.id == pageId) updated else it }) }
+            if (edited.isFlattened && (edited.crop != page.crop || edited.rotation != page.rotation)) {
+                edited = withMesh(docId, edited, computeFlatten(docId, edited))
+            }
+            savePage(docId, page, edited)
         }
         Unit
+    }
+
+    /**
+     * Turns flattening on or off for a page; turning it on also redoes a page flattened by an earlier
+     * version. Returns false if there wasn't enough text or visible paper edge to work from.
+     */
+    suspend fun setFlatten(docId: String, pageId: String, enabled: Boolean): Boolean = withContext(Dispatchers.Default) {
+        editMutex.withLock {
+            val page = findPage(docId, pageId) ?: return@withLock false
+            if (if (enabled) page.isFlattenedByCurrentVersion else !page.isFlattened) return@withLock true
+            val mesh = if (enabled) computeFlatten(docId, page) ?: return@withLock false else null
+            savePage(docId, page, withMesh(docId, page, mesh))
+            true
+        }
+    }
+
+    /** Flattens every page not yet flattened by the current version. Returns (pages flattened, pages that couldn't be). */
+    suspend fun flattenAll(docId: String): Pair<Int, Int> {
+        _busy.update { it + docId }
+        try {
+            var flattened = 0
+            var failed = 0
+            for (page in find(docId)?.pages.orEmpty()) {
+                if (page.isFlattenedByCurrentVersion) continue
+                if (setFlatten(docId, page.id, true)) flattened++ else failed++
+            }
+            return flattened to failed
+        } finally {
+            _busy.update { it - docId }
+        }
     }
 
     suspend fun movePage(docId: String, from: Int, to: Int) {
@@ -131,6 +180,7 @@ class DocumentRepository(private val context: Context) {
         withContext(Dispatchers.IO) {
             imageFile(docId, removed).delete()
             previewFile(docId, removed).delete()
+            removed.flattenMesh?.let { File(dir(docId), it).delete() }
         }
     }
 
@@ -149,10 +199,66 @@ class DocumentRepository(private val context: Context) {
 
     private fun dir(docId: String) = File(root, docId)
 
+    private fun findPage(docId: String, pageId: String) = find(docId)?.pages?.find { it.id == pageId }
+
+    /** Re-renders the preview for [edited] and stores it in place of [previous]. */
+    private suspend fun savePage(docId: String, previous: Page, edited: Page) {
+        writePreview(docId, edited, source = null)
+        val updated = edited.copy(version = previous.version + 1)
+        modify(docId) { doc -> doc.copy(pages = doc.pages.map { if (it.id == previous.id) updated else it }) }
+    }
+
+    /** Runs [detect] on the brightness of [image] scaled to fit [maxDimension]. */
+    private fun <T> analyse(image: Bitmap, maxDimension: Int, detect: (IntArray, Int, Int) -> T): T {
+        val scaled = ImageProcessor.scaleToFit(image, maxDimension)
+        try {
+            return detect(ImageProcessor.luminance(scaled), scaled.width, scaled.height)
+        } finally {
+            if (scaled !== image) scaled.recycle()
+        }
+    }
+
+    /** Stores [mesh] as the page's flattening (or removes it when null), returning the updated page. */
+    private fun withMesh(docId: String, page: Page, mesh: FlattenMesh?): Page {
+        val file = File(dir(docId), "${page.id}_mesh.bin")
+        if (mesh == null) {
+            file.delete()
+            return page.copy(flatten = null, flattenMesh = null, flattenVersion = 0)
+        }
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        tmp.writeBytes(mesh.toBytes())
+        if (!tmp.renameTo(file)) throw IOException("Cannot save $file")
+        return page.copy(flatten = null, flattenMesh = file.name, flattenVersion = FlattenSolver.VERSION)
+    }
+
+    /**
+     * Reads the text, printed rules and paper edges on a page, and works out a mesh that straightens its lines
+     * and straightens its edges, or null if that isn't possible.
+     */
+    private suspend fun computeFlatten(docId: String, page: Page): FlattenMesh? {
+        val original = ImageProcessor.decodeFile(imageFile(docId, page), FLATTEN_ANALYSIS_DIMENSION)
+        val geometry = ImageProcessor.renderForFlattening(original, page)
+        return try {
+            val words = OcrEngine().use { it.recogniseWords(geometry) }
+            val edges = analyse(geometry, EDGE_ANALYSIS_DIMENSION) { luma, w, h -> PaperEdgeDetector.detect(luma, w, h) }
+            // Printed rules are thin; a larger image keeps them dark enough to trace.
+            val rules = analyse(geometry, RULE_ANALYSIS_DIMENSION) { luma, w, h -> RuleDetector.detect(luma, w, h) }
+            FlattenSolver.solve(words, edges, geometry.width, geometry.height, rules)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not flatten page ${page.id}", e)
+            null
+        } finally {
+            if (geometry !== original) geometry.recycle()
+            original.recycle()
+        }
+    }
+
     private fun writePreview(docId: String, page: Page, source: Bitmap?) {
         val original = source?.let { ImageProcessor.scaleToFit(it, PREVIEW_MAX_DIMENSION) }
             ?: ImageProcessor.decodeFile(imageFile(docId, page), PREVIEW_MAX_DIMENSION)
-        val rendered = ImageProcessor.render(original, page)
+        val rendered = ImageProcessor.render(original, page, loadMesh(docId, page))
         try {
             ImageProcessor.writeJpeg(rendered, previewFile(docId, page), PREVIEW_JPEG_QUALITY)
         } finally {
@@ -188,5 +294,8 @@ class DocumentRepository(private val context: Context) {
         const val ORIGINAL_JPEG_QUALITY = 92
         const val PREVIEW_MAX_DIMENSION = 1200
         const val PREVIEW_JPEG_QUALITY = 85
+        const val FLATTEN_ANALYSIS_DIMENSION = 2000
+        const val EDGE_ANALYSIS_DIMENSION = 1000
+        const val RULE_ANALYSIS_DIMENSION = 1400
     }
 }

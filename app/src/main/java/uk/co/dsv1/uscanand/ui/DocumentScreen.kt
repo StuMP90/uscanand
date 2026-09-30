@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.Card
@@ -73,7 +74,7 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onOpenPage: (String) -> Un
     val app = LocalContext.current.app
     val repository = app.repository
     val documents by repository.documents.collectAsStateWithLifecycle()
-    val importing by repository.importing.collectAsStateWithLifecycle()
+    val busy by repository.busy.collectAsStateWithLifecycle()
     val exportState by app.exporter.state.collectAsStateWithLifecycle()
     val doc = documents?.find { it.id == docId }
     val scope = rememberCoroutineScope()
@@ -94,7 +95,7 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onOpenPage: (String) -> Un
 
     if (doc == null) return
     val hasPages = doc.pages.isNotEmpty()
-    val isImporting = docId in importing
+    val isBusy = docId in busy
 
     Scaffold(
         topBar = {
@@ -113,11 +114,14 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onOpenPage: (String) -> Un
                     }
                 },
                 actions = {
-                    IconButton(onClick = { saveLauncher.launch(pdfFileName(doc.name)) }, enabled = hasPages && !isImporting) {
+                    IconButton(onClick = { saveLauncher.launch(pdfFileName(doc.name)) }, enabled = hasPages && !isBusy) {
                         Icon(Icons.Filled.SaveAlt, contentDescription = stringResource(R.string.save_pdf))
                     }
                     OverflowMenu { dismiss ->
                         MenuItem(R.string.rename, Icons.Filled.Edit) { dismiss(); renaming = true }
+                        if (hasPages && !isBusy) {
+                            MenuItem(R.string.flatten_all, Icons.Filled.Straighten) { dismiss(); app.flattenAllPages(docId) }
+                        }
                         MenuItem(R.string.delete_document, Icons.Filled.Delete) { dismiss(); confirmDelete = true }
                     }
                 },
@@ -138,7 +142,7 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onOpenPage: (String) -> Un
                     }
                 },
                 floatingActionButton = {
-                    if (hasPages && !isImporting) {
+                    if (hasPages && !isBusy) {
                         ExtendedFloatingActionButton(
                             onClick = { app.exporter.start(docId, ExportTarget.Share) },
                             icon = { Icon(Icons.Filled.Share, contentDescription = null) },
@@ -150,11 +154,11 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onOpenPage: (String) -> Un
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            if (isImporting) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (isBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (!hasPages) {
                 Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                     Text(
-                        stringResource(if (isImporting) R.string.importing_pages else R.string.no_pages),
+                        stringResource(if (isBusy) R.string.importing_pages else R.string.no_pages),
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

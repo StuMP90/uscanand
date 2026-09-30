@@ -10,3 +10,6 @@ captures/
 *.keystore
 *.jks
 keystore.properties
+
+# Local sample scans (may contain personal documents)
+/*.pdf
