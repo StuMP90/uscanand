@@ -108,7 +108,7 @@ class PdfWriterTest {
             TextLine("Hello searchable world", 40, 50, 360, 80),
             TextLine("Second line of text", 40, 100, 300, 125),
         )
-        val file = File("build/test-output/sample.pdf").apply { parentFile.mkdirs() }
+        val file = File("build/test-output/sample.pdf").apply { parentFile?.mkdirs() }
         file.writeBytes(writePdf(jpeg("portrait.jpg") to lines, jpeg("landscape.jpg") to emptyList()))
         assertTrue(file.length() > 0)
     }
