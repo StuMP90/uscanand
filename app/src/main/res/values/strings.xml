@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">uScanAnd</string>
+    <string name="app_name">uScanAnd...</string>
+    <!-- Shorter name shown under the home screen icon. -->
+    <string name="launcher_name">uScan</string>
 
     <string name="scan">Scan</string>
     <string name="scan_more">Scan</string>

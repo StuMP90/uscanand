@@ -1,4 +1,4 @@
-# uScanAnd
+# uScanAnd...
 
 An Android document scanner. It captures pages with the camera, detects the page edges and straightens them, and puts them together into a PDF. On-device text recognition can make the PDF searchable.
 
